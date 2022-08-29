@@ -1,4 +1,4 @@
-use super::{BTreeMap, Felt, StarkField, Word, INIT_MEM_VALUE};
+use super::{BTreeMap, Felt, StarkField, Vec, Word, INIT_MEM_VALUE};
 
 // MEMORY SEGMENT TRACE
 // ================================================================================================

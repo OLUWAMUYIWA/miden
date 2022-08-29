@@ -97,7 +97,8 @@ impl Chiplets {
     /// the execution trace at which the permutation started.
     pub fn permute(&mut self, state: HasherState) -> (Felt, HasherState) {
         let (addr, return_state, lookups) = self.hasher.permute(state);
-        self.bus.request_hasher_operation(lookups, self.clk as usize);
+        self.bus
+            .request_hasher_operation(lookups, self.clk as usize);
 
         (addr, return_state)
     }
@@ -114,7 +115,8 @@ impl Chiplets {
     /// - The provided index is out of range for the specified path.
     pub fn build_merkle_root(&mut self, value: Word, path: &[Word], index: Felt) -> (Felt, Word) {
         let (addr, root, lookups) = self.hasher.build_merkle_root(value, path, index);
-        self.bus.request_hasher_operation(lookups, self.clk as usize);
+        self.bus
+            .request_hasher_operation(lookups, self.clk as usize);
 
         (addr, root)
     }
@@ -139,7 +141,8 @@ impl Chiplets {
         let (addr, old_root, new_root, lookups) = self
             .hasher
             .update_merkle_root(old_value, new_value, path, index);
-        self.bus.request_hasher_operation(lookups, self.clk as usize);
+        self.bus
+            .request_hasher_operation(lookups, self.clk as usize);
 
         (addr, old_root, new_root)
     }
@@ -158,7 +161,8 @@ impl Chiplets {
         debug_assert_eq!(expected_result, result.into());
 
         // send the request for the hash initialization
-        self.bus.request_hasher_lookup(lookups[0], self.clk as usize);
+        self.bus
+            .request_hasher_lookup(lookups[0], self.clk as usize);
 
         // enqueue the request for the hash result
         self.bus.enqueue_hasher_request(lookups[1]);
@@ -182,7 +186,8 @@ impl Chiplets {
         debug_assert_eq!(expected_result, result.into());
 
         // send the request for the hash initialization
-        self.bus.request_hasher_lookup(lookups[0], self.clk as usize);
+        self.bus
+            .request_hasher_lookup(lookups[0], self.clk as usize);
 
         // enqueue the rest of the requests in reverse order so that the next request is at
         // the top of the queue.
@@ -224,7 +229,8 @@ impl Chiplets {
         let result = self.bitwise.u32and(a, b)?;
 
         let bitwise_lookup = BitwiseLookup::new(BITWISE_AND_LABEL, a, b, result);
-        self.bus.request_bitwise_operation(bitwise_lookup, self.clk as usize);
+        self.bus
+            .request_bitwise_operation(bitwise_lookup, self.clk as usize);
 
         Ok(result)
     }
@@ -236,7 +242,8 @@ impl Chiplets {
         let result = self.bitwise.u32xor(a, b)?;
 
         let bitwise_lookup = BitwiseLookup::new(BITWISE_XOR_LABEL, a, b, result);
-        self.bus.request_bitwise_operation(bitwise_lookup, self.clk as usize);
+        self.bus
+            .request_bitwise_operation(bitwise_lookup, self.clk as usize);
 
         Ok(result)
     }
@@ -255,7 +262,8 @@ impl Chiplets {
 
         // send the memory read request to the bus
         let memory_lookup = MemoryLookup::from_ints(ctx, addr, self.clk, value, value);
-        self.bus.request_memory_operation(memory_lookup, self.clk as usize);
+        self.bus
+            .request_memory_operation(memory_lookup, self.clk as usize);
 
         value
     }
@@ -268,7 +276,8 @@ impl Chiplets {
 
         // send the memory write request to the bus
         let memory_lookup = MemoryLookup::from_ints(ctx, addr, self.clk, old_word, word);
-        self.bus.request_memory_operation(memory_lookup, self.clk as usize);
+        self.bus
+            .request_memory_operation(memory_lookup, self.clk as usize);
 
         old_word
     }
@@ -283,14 +292,15 @@ impl Chiplets {
 
         // send the memory write request to the bus
         let memory_lookup = MemoryLookup::from_ints(ctx, addr, self.clk, old_word, word);
-        self.bus.request_memory_operation(memory_lookup, self.clk as usize);
+        self.bus
+            .request_memory_operation(memory_lookup, self.clk as usize);
 
         old_word
     }
 
     /// Returns a word located in the specified memory context at the specified address in the
     /// most current clock cycle, or None if the address hasn't been accessed previously.
-    /// 
+    ///
     /// Unlike the read_mem() method, this method does not modify the underlying memory access
     /// trace.
     pub fn get_mem_value(&self, ctx: u32, addr: u64) -> Option<Word> {
