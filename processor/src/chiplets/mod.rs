@@ -3,7 +3,7 @@ use super::{
     Word, CHIPLETS_WIDTH, ONE, ZERO,
 };
 use crate::{trace::LookupTableRow, ExecutionError};
-use core::ops::RangeInclusive;
+
 use vm_core::{
     chiplets::bitwise::{BITWISE_AND_LABEL, BITWISE_XOR_LABEL},
     chiplets::hasher::{Digest, HasherState},
@@ -64,7 +64,7 @@ mod tests;
 #[derive(Default)]
 pub struct Chiplets {
     /// Current clock cycle of the VM.
-    clk: usize,
+    clk: u32,
     hasher: Hasher,
     bitwise: Bitwise,
     memory: Memory,
@@ -97,7 +97,7 @@ impl Chiplets {
     /// the execution trace at which the permutation started.
     pub fn permute(&mut self, state: HasherState) -> (Felt, HasherState) {
         let (addr, return_state, lookups) = self.hasher.permute(state);
-        self.bus.request_hasher_operation(lookups, self.clk);
+        self.bus.request_hasher_operation(lookups, self.clk as usize);
 
         (addr, return_state)
     }
@@ -114,7 +114,7 @@ impl Chiplets {
     /// - The provided index is out of range for the specified path.
     pub fn build_merkle_root(&mut self, value: Word, path: &[Word], index: Felt) -> (Felt, Word) {
         let (addr, root, lookups) = self.hasher.build_merkle_root(value, path, index);
-        self.bus.request_hasher_operation(lookups, self.clk);
+        self.bus.request_hasher_operation(lookups, self.clk as usize);
 
         (addr, root)
     }
@@ -139,7 +139,7 @@ impl Chiplets {
         let (addr, old_root, new_root, lookups) = self
             .hasher
             .update_merkle_root(old_value, new_value, path, index);
-        self.bus.request_hasher_operation(lookups, self.clk);
+        self.bus.request_hasher_operation(lookups, self.clk as usize);
 
         (addr, old_root, new_root)
     }
@@ -158,7 +158,7 @@ impl Chiplets {
         debug_assert_eq!(expected_result, result.into());
 
         // send the request for the hash initialization
-        self.bus.request_hasher_lookup(lookups[0], self.clk);
+        self.bus.request_hasher_lookup(lookups[0], self.clk as usize);
 
         // enqueue the request for the hash result
         self.bus.enqueue_hasher_request(lookups[1]);
@@ -182,7 +182,7 @@ impl Chiplets {
         debug_assert_eq!(expected_result, result.into());
 
         // send the request for the hash initialization
-        self.bus.request_hasher_lookup(lookups[0], self.clk);
+        self.bus.request_hasher_lookup(lookups[0], self.clk as usize);
 
         // enqueue the rest of the requests in reverse order so that the next request is at
         // the top of the queue.
@@ -200,7 +200,7 @@ impl Chiplets {
     /// its requested lookups. Therefore, the next queued lookup is expected to be a precomputed
     /// lookup for absorbing new elements into the hasher state.
     pub fn absorb_span_batch(&mut self) {
-        self.bus.send_queued_hasher_request(self.clk);
+        self.bus.send_queued_hasher_request(self.clk as usize);
     }
 
     /// Sends a request for a control block hash result to the Chiplets Bus. It's expected to be
@@ -211,7 +211,7 @@ impl Chiplets {
     /// its requested lookups. Therefore, the next queued lookup is expected to be a precomputed
     /// lookup for returning a hash result.
     pub fn read_hash_result(&mut self) {
-        self.bus.send_queued_hasher_request(self.clk);
+        self.bus.send_queued_hasher_request(self.clk as usize);
     }
 
     // BITWISE CHIPLET ACCESSORS
@@ -224,7 +224,7 @@ impl Chiplets {
         let result = self.bitwise.u32and(a, b)?;
 
         let bitwise_lookup = BitwiseLookup::new(BITWISE_AND_LABEL, a, b, result);
-        self.bus.request_bitwise_operation(bitwise_lookup, self.clk);
+        self.bus.request_bitwise_operation(bitwise_lookup, self.clk as usize);
 
         Ok(result)
     }
@@ -236,7 +236,7 @@ impl Chiplets {
         let result = self.bitwise.u32xor(a, b)?;
 
         let bitwise_lookup = BitwiseLookup::new(BITWISE_XOR_LABEL, a, b, result);
-        self.bus.request_bitwise_operation(bitwise_lookup, self.clk);
+        self.bus.request_bitwise_operation(bitwise_lookup, self.clk as usize);
 
         Ok(result)
     }
@@ -244,62 +244,65 @@ impl Chiplets {
     // MEMORY CHIPLET ACCESSORS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns a word (4 elements) located in memory at the specified address.
+    /// Returns a word (4 elements) located in the specified memory context at the specified
+    /// address.
     ///
     /// If the specified address hasn't been previously written to, four ZERO elements are
     /// returned. This effectively implies that memory is initialized to ZERO.
-    pub fn read_mem(&mut self, addr: Felt) -> Word {
+    pub fn read_mem(&mut self, ctx: u32, addr: Felt) -> Word {
         // read the word from memory
-        let value = self.memory.read(addr);
+        let value = self.memory.read(ctx, addr);
 
         // send the memory read request to the bus
-        let memory_lookup = MemoryLookup::new(addr, self.clk as u64, value, value);
-        self.bus.request_memory_operation(memory_lookup, self.clk);
+        let memory_lookup = MemoryLookup::from_ints(ctx, addr, self.clk, value, value);
+        self.bus.request_memory_operation(memory_lookup, self.clk as usize);
 
         value
     }
 
-    /// Writes the provided element to memory at the specified address leaving the remaining 3
-    /// elements of the word previously stored at that address unchanged.
-    pub fn write_mem_single(&mut self, addr: Felt, value: Felt) -> Word {
-        let old_word = self.memory.get_old_value(addr);
+    /// Writes the provided word (4 elements) into the specified memory context at the specified
+    /// address.
+    pub fn write_mem(&mut self, ctx: u32, addr: Felt, word: Word) -> Word {
+        let old_word = self.memory.get_old_value(ctx, addr);
+        self.memory.write(ctx, addr, word);
+
+        // send the memory write request to the bus
+        let memory_lookup = MemoryLookup::from_ints(ctx, addr, self.clk, old_word, word);
+        self.bus.request_memory_operation(memory_lookup, self.clk as usize);
+
+        old_word
+    }
+
+    /// Writes the provided element into the specified memory context at the specified address
+    /// leaving the remaining 3 elements of the word previously stored at that address unchanged.
+    pub fn write_mem_single(&mut self, ctx: u32, addr: Felt, value: Felt) -> Word {
+        let old_word = self.memory.get_old_value(ctx, addr);
         let word = [value, old_word[1], old_word[2], old_word[3]];
 
-        self.memory.write(addr, word);
+        self.memory.write(ctx, addr, word);
 
         // send the memory write request to the bus
-        let memory_lookup = MemoryLookup::new(addr, self.clk as u64, old_word, word);
-        self.bus.request_memory_operation(memory_lookup, self.clk);
+        let memory_lookup = MemoryLookup::from_ints(ctx, addr, self.clk, old_word, word);
+        self.bus.request_memory_operation(memory_lookup, self.clk as usize);
 
         old_word
     }
 
-    /// Writes the provided word (4 elements) to memory at the specified address.
-    pub fn write_mem(&mut self, addr: Felt, word: Word) -> Word {
-        let old_word = self.memory.get_old_value(addr);
-        self.memory.write(addr, word);
-
-        // send the memory write request to the bus
-        let memory_lookup = MemoryLookup::new(addr, self.clk as u64, old_word, word);
-        self.bus.request_memory_operation(memory_lookup, self.clk);
-
-        old_word
+    /// Returns a word located in the specified memory context at the specified address in the
+    /// most current clock cycle, or None if the address hasn't been accessed previously.
+    /// 
+    /// Unlike the read_mem() method, this method does not modify the underlying memory access
+    /// trace.
+    pub fn get_mem_value(&self, ctx: u32, addr: u64) -> Option<Word> {
+        self.memory.get_value(ctx, addr)
     }
 
-    /// Returns a word located at the specified address, or None if the address hasn't been
-    /// accessed previously.
-    pub fn get_mem_value(&self, addr: u64) -> Option<Word> {
-        self.memory.get_value(addr)
+    /// Returns the complete state of the specified memory context at the specified clock cycle.
+    pub fn get_mem_state_at(&self, ctx: u32, clk: u32) -> Vec<(u64, Word)> {
+        self.memory.get_state_at(ctx, clk)
     }
 
-    /// Returns values within a range of addresses, or optionally all values at the beginning of.
-    /// the specified cycle.
-    /// TODO: Refactor to something like `pub fn get_mem_state(&self, clk: u64) -> Vec<(u64, Word)>`
-    pub fn get_mem_values_at(&self, range: RangeInclusive<u64>, step: u64) -> Vec<(u64, Word)> {
-        self.memory.get_values_at(range, step)
-    }
-
-    /// Returns current size of the memory (in words).
+    /// Returns current size of the memory (in words) across all memory contexts.
     #[cfg(test)]
     pub fn get_mem_size(&self) -> usize {
         self.memory.size()
